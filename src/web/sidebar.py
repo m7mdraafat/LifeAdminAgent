@@ -2,6 +2,7 @@
 
 import streamlit as st
 from datetime import date
+from .auth import get_current_user, logout
 
 
 def render_sidebar():
@@ -9,7 +10,17 @@ def render_sidebar():
     with st.sidebar:
         # App branding
         st.markdown("## :material/task_alt: Life Admin")
-        st.caption("Your personal life organizer")
+        
+        # User info
+        user = get_current_user()
+        if user:
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.caption(f"👤 {user['display_name']}")
+            with col2:
+                if st.button("↪️", help="Logout", key="logout_btn"):
+                    logout()
+                    st.rerun()
         
         st.divider()
 

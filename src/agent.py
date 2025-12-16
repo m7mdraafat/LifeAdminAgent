@@ -144,6 +144,15 @@ class LifeAdminAgent:
         # Track conversation for token management
         self.conversation_history: List[Dict[str, str]] = []
         self.conversation_summary: Optional[str] = None
+    
+    def set_user(self, user_id: str):
+        """Set the current user for data isolation."""
+        self.repository.set_user(user_id)
+        # Re-share repository with tools to update user context
+        set_document_repository(self.repository)
+        set_subscription_repository(self.repository)
+        set_checklist_repository(self.repository)
+        set_notification_repository(self.repository)
 
 
     def _load_system_prompt(self) -> str:
