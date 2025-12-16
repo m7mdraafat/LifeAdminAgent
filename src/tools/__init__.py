@@ -30,15 +30,26 @@ from .checklists import (
     set_repository as set_checklist_repository
 )
 
+from .notifications import (
+    NOTIFICATION_TOOLS,
+    check_notification_status,
+    send_expiry_reminder,
+    send_test_notification,
+    get_daily_digest,
+    set_repository as set_notification_repository
+)
+
 # Combined tools list
-ALL_TOOLS = DOCUMENT_TOOLS + SUBSCRIPTION_TOOLS + CHECKLIST_TOOLS
+ALL_TOOLS = DOCUMENT_TOOLS + SUBSCRIPTION_TOOLS + CHECKLIST_TOOLS + NOTIFICATION_TOOLS
 
 __all__ = [
     "DOCUMENT_TOOLS",
     "SUBSCRIPTION_TOOLS", 
     "CHECKLIST_TOOLS",
+    "NOTIFICATION_TOOLS",
     "ALL_TOOLS",
     "set_document_repository",
     "set_subscription_repository",
-    "set_checklist_repository"
+    "set_checklist_repository",
+    "set_notification_repository"
 ]
