@@ -7,7 +7,7 @@ from datetime import date, datetime
 from typing import Annotated, Optional
 
 from ..database.repository.repository import Repository
-from ..database.models.Subsciption import Subscription
+from ..database.models.Subscription import Subscription
 
 
 # Shared repository instance

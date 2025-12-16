@@ -7,7 +7,7 @@ from contextlib import contextmanager
 
 from ..models.Document import Document
 from ..models.LifeEvent import LifeEvent, ChecklistItem
-from ..models.Subsciption import Subscription
+from ..models.Subscription import Subscription
 
 class Repository:
     """Database operations for Life Admin Assistant."""
