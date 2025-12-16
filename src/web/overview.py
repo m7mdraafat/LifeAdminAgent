@@ -58,17 +58,30 @@ def render_overview_tab():
         
         st.markdown("### Life Events")
         if events:
-            for event in events[:3]:
+            for event in events:
                 completed, total = event.get_progress()
                 pct = event.get_progress_percentage()
                 days_left = (event.target_date - date.today()).days
                 
-                st.markdown(f"**{event.title}**")
-                col_a, col_b = st.columns([3, 1])
-                with col_a:
-                    st.progress(pct / 100, text=f"{completed}/{total} tasks")
-                with col_b:
-                    st.caption(f"{days_left}d left")
+                with st.expander(f"**{event.title}** - {completed}/{total} tasks ({days_left}d left)", expanded=False):
+                    st.progress(pct / 100)
+                    
+                    # Group tasks by category
+                    tasks_by_category = {}
+                    for item in event.checklist_items:
+                        cat = (item.category or "general").replace("_", " ").title()
+                        if cat not in tasks_by_category:
+                            tasks_by_category[cat] = []
+                        tasks_by_category[cat].append(item)
+                    
+                    for category, items in tasks_by_category.items():
+                        st.markdown(f"**{category}**")
+                        for item in items:
+                            icon = ":material/check_circle:" if item.is_completed else ":material/radio_button_unchecked:"
+                            if item.description:
+                                st.markdown(f"{icon} **{item.title}**  \n{item.description}")
+                            else:
+                                st.markdown(f"{icon} **{item.title}**")
         else:
             st.info("No life events. Try: 'I'm moving next month'")
     
