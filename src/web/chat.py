@@ -52,7 +52,7 @@ def render_chat():
     with tab1:
         # Header - always visible
         st.markdown(
-            "<h2 style='text-align: center;'>✓ Life Admin Agent</h2>"
+            "<h2 style='text-align: center;'>🤖 Life Admin Assistant Chat</h2>"
             "<p style='text-align: center; color: gray;'>"
             "Your personal assistant for documents, subscriptions, and life's big moments."
             "</p>",
