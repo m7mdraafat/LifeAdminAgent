@@ -12,10 +12,15 @@ from ..models.Subscription import Subscription
 class Repository:
     """Database operations for Life Admin Assistant."""
 
-    def __init__(self, db_path: str = "data/life_admin.db"):
+    def __init__(self, db_path: str = "data/life_admin.db", user_id: str = None):
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.user_id = user_id  # Current user's ID for data isolation
         self._init_database()
+    
+    def set_user(self, user_id: str):
+        """Set the current user for data filtering."""
+        self.user_id = user_id
 
     @contextmanager
     def _get_connection(self):
@@ -52,11 +57,15 @@ class Repository:
                 updated_at TEXT
                 )
             """)
+            
+            # Migration: Add user_id column if it doesn't exist
+            self._migrate_add_user_id_column(cursor, "documents")
 
             # Life events table
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS life_events (
                 id TEXT PRIMARY KEY,
+                user_id TEXT,
                 event_type TEXT,
                 title TEXT,
                 target_date TEXT,
@@ -66,6 +75,9 @@ class Repository:
                 created_at TEXT
                 )
             """)
+            
+            # Migration: Add user_id column if it doesn't exist
+            self._migrate_add_user_id_column(cursor, "life_events")
 
             # Subscriptions table
             cursor.execute("""
@@ -84,6 +96,16 @@ class Repository:
                 created_at TEXT
                 )
             """)
+            
+            # Migration: Add user_id column if it doesn't exist
+            self._migrate_add_user_id_column(cursor, "subscriptions")
+    
+    def _migrate_add_user_id_column(self, cursor, table_name: str):
+        """Add user_id column to existing tables if missing."""
+        cursor.execute(f"PRAGMA table_info({table_name})")
+        columns = [col[1] for col in cursor.fetchall()]
+        if "user_id" not in columns:
+            cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN user_id TEXT")
 
 
     # DOCUMENT OPERATIONS
@@ -94,10 +116,11 @@ class Repository:
             cursor = conn.cursor()
             cursor.execute("""
             INSERT OR REPLACE INTO documents
-            (id, name, category, expiry_date, reminder_days, notes, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            (id, user_id, name, category, expiry_date, reminder_days, notes, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 document.id,
+                self.user_id,
                 document.name,
                 document.category,
                 document.expiry_date.isoformat(),
@@ -109,36 +132,39 @@ class Repository:
         return document
     
     def get_documents(self, category: Optional[str] = None) -> List[Document]:
-        """Get all documents, optionally filtered by category."""
+        """Get all documents for current user, optionally filtered by category."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             if category:
                 cursor.execute(
-                    "SELECT * FROM documents WHERE category = ? ORDER BY expiry_date ASC",
-                    (category,)
+                    "SELECT * FROM documents WHERE user_id = ? AND category = ? ORDER BY expiry_date ASC",
+                    (self.user_id, category)
                 )
             else:
-                cursor.execute("SELECT * FROM documents ORDER BY expiry_date ASC")
+                cursor.execute(
+                    "SELECT * FROM documents WHERE user_id = ? ORDER BY expiry_date ASC",
+                    (self.user_id,)
+                )
             return [self._row_to_document(row) for row in cursor.fetchall()]
         
 
     def get_expiring_documents(self, days_ahead: int = 30) -> List[Document]:
-        """Get documents expiring within N days."""
+        """Get documents expiring within N days for current user."""
         end_date = date.today() + timedelta(days=days_ahead)
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
             SELECT * FROM documents
-            WHERE DATE(expiry_date) <= DATE(?)
+            WHERE user_id = ? AND DATE(expiry_date) <= DATE(?)
             ORDER BY expiry_date ASC
-            """, (end_date.isoformat(),))
+            """, (self.user_id, end_date.isoformat()))
             return [self._row_to_document(row) for row in cursor.fetchall()]
     
     def delete_document(self, document_id: str) -> bool:
-        """Delete a document by ID."""
+        """Delete a document by ID (only if owned by current user)."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("DELETE FROM documents WHERE id = ?", (document_id,))
+            cursor.execute("DELETE FROM documents WHERE id = ? AND user_id = ?", (document_id, self.user_id))
             return cursor.rowcount > 0
     
     def _row_to_document(self, row) -> Document:
@@ -162,11 +188,12 @@ class Repository:
             cursor = conn.cursor()
             cursor.execute("""
             INSERT OR REPLACE INTO subscriptions
-            (id, service_name, cost, renewal_date, billing_cycle, category,
+            (id, user_id, service_name, cost, renewal_date, billing_cycle, category,
              is_free_trial, trial_end_date, is_active, notes, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 subscription.id,
+                self.user_id,
                 subscription.service_name,
                 subscription.cost,
                 subscription.renewal_date.isoformat(),
@@ -181,31 +208,37 @@ class Repository:
         return subscription
 
     def get_subscriptions(self, active_only: bool = False) -> List[Subscription]:
-        """Get all subscriptions, optionally filtering only active ones."""
+        """Get all subscriptions for current user, optionally filtering only active ones."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             if active_only:
-                cursor.execute("SELECT * FROM subscriptions WHERE is_active = 1 ORDER BY renewal_date ASC")
+                cursor.execute(
+                    "SELECT * FROM subscriptions WHERE user_id = ? AND is_active = 1 ORDER BY renewal_date ASC",
+                    (self.user_id,)
+                )
             else:
-                cursor.execute("SELECT * FROM subscriptions ORDER BY renewal_date ASC")
+                cursor.execute(
+                    "SELECT * FROM subscriptions WHERE user_id = ? ORDER BY renewal_date ASC",
+                    (self.user_id,)
+                )
             return [self._row_to_subscription(row) for row in cursor.fetchall()]
     
     def get_free_trials(self) -> List[Subscription]:
-        """Get all active free trials."""
+        """Get all active free trials for current user."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT * FROM subscriptions 
-                WHERE is_free_trial = 1 AND is_active = 1
+                WHERE user_id = ? AND is_free_trial = 1 AND is_active = 1
                 ORDER BY trial_end_date ASC
-            """)
+            """, (self.user_id,))
             return [self._row_to_subscription(row) for row in cursor.fetchall()]
 
     def delete_subscription(self, subscription_id: str) -> bool:
-        """Delete a subscription by ID."""
+        """Delete a subscription by ID (only if owned by current user)."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("DELETE FROM subscriptions WHERE id = ?", (subscription_id,))
+            cursor.execute("DELETE FROM subscriptions WHERE id = ? AND user_id = ?", (subscription_id, self.user_id))
             return cursor.rowcount > 0
         
     def get_spending_summary(self) -> dict:
@@ -247,11 +280,12 @@ class Repository:
             cursor.execute(
                 """
                 INSERT OR REPLACE INTO life_events
-                (id, event_type, title, target_date, checklist_items, status, notes, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                (id, user_id, event_type, title, target_date, checklist_items, status, notes, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     event.id,
+                    self.user_id,
                     event.event_type,
                     event.title,
                     event.target_date.isoformat(),
@@ -287,23 +321,26 @@ class Repository:
         return True
     
     def get_life_events(self, status: Optional[str] = None) -> List[LifeEvent]:
-        """Get all life events, optionally filtered by status."""
+        """Get all life events for current user, optionally filtered by status."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             if status:
                 cursor.execute(
-                    "SELECT * FROM life_events WHERE status = ? ORDER BY target_date ASC",
-                    (status,)
+                    "SELECT * FROM life_events WHERE user_id = ? AND status = ? ORDER BY target_date ASC",
+                    (self.user_id, status)
                 )
             else:
-                cursor.execute("SELECT * FROM life_events ORDER BY target_date ASC")
+                cursor.execute(
+                    "SELECT * FROM life_events WHERE user_id = ? ORDER BY target_date ASC",
+                    (self.user_id,)
+                )
             return [self._row_to_life_event(row) for row in cursor.fetchall()]
 
     def get_life_event(self, event_id: str) -> Optional[LifeEvent]:
-        """Get a single life event by ID."""
+        """Get a single life event by ID (only if owned by current user)."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM life_events WHERE id = ?", (event_id,))
+            cursor.execute("SELECT * FROM life_events WHERE id = ? AND user_id = ?", (event_id, self.user_id))
             row = cursor.fetchone()
             if row:
                 return self._row_to_life_event(row)
@@ -340,8 +377,8 @@ class Repository:
         )
         
     def delete_life_event(self, event_id: str) -> bool:
-        """Delete a life event by ID."""
+        """Delete a life event by ID (only if owned by current user)."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("DELETE FROM life_events WHERE id = ?", (event_id,))
+            cursor.execute("DELETE FROM life_events WHERE id = ? AND user_id = ?", (event_id, self.user_id))
             return cursor.rowcount > 0
