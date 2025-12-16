@@ -1,0 +1,77 @@
+[
+  {
+    "query": "My passport expires on March 15, 2026",
+    "expected_tool": "add_document",
+    "expected_behavior": "Should add a passport document with expiry date 2026-03-15"
+  },
+  {
+    "query": "What documents are expiring soon?",
+    "expected_tool": "get_expiring_documents",
+    "expected_behavior": "Should list documents expiring within 30 days with urgency indicators"
+  },
+  {
+    "query": "I subscribe to Netflix for $15.99 per month",
+    "expected_tool": "add_subscription",
+    "expected_behavior": "Should add Netflix subscription with monthly billing of $15.99"
+  },
+  {
+    "query": "Show me my subscription spending",
+    "expected_tool": "get_spending_summary",
+    "expected_behavior": "Should display monthly and yearly spending totals"
+  },
+  {
+    "query": "I'm moving to a new apartment on January 15, 2026",
+    "expected_tool": "start_life_event",
+    "expected_behavior": "Should create a moving life event with checklist"
+  },
+  {
+    "query": "Show my moving checklist",
+    "expected_tool": "get_checklist",
+    "expected_behavior": "Should display the moving checklist with progress"
+  },
+  {
+    "query": "Mark 'Change address with post office' as complete",
+    "expected_tool": "mark_task_complete",
+    "expected_behavior": "Should mark the task complete and show updated progress"
+  },
+  {
+    "query": "Delete my gym subscription",
+    "expected_tool": "delete_subscription",
+    "expected_behavior": "Should remove the gym subscription from tracking"
+  },
+  {
+    "query": "I started a free trial for Spotify, ends December 31, 2025",
+    "expected_tool": "add_subscription",
+    "expected_behavior": "Should add Spotify as a free trial with trial end date"
+  },
+  {
+    "query": "What free trials are ending soon?",
+    "expected_tool": "get_trial_alerts",
+    "expected_behavior": "Should show free trials ending in the next 7 days"
+  },
+  {
+    "query": "Add a task 'Pack winter clothes' to my moving checklist",
+    "expected_tool": "add_task_to_checklist",
+    "expected_behavior": "Should add new task to the moving event checklist"
+  },
+  {
+    "query": "Send me a reminder email about expiring items",
+    "expected_tool": "send_expiry_reminder",
+    "expected_behavior": "Should send email notification about expiring documents and trials"
+  },
+  {
+    "query": "List all my life events",
+    "expected_tool": "list_life_events",
+    "expected_behavior": "Should show all tracked life events with progress"
+  },
+  {
+    "query": "My driver's license expires June 30, 2026",
+    "expected_tool": "add_document",
+    "expected_behavior": "Should add driver's license to identification category"
+  },
+  {
+    "query": "Give me a daily digest of what needs attention",
+    "expected_tool": "get_daily_digest",
+    "expected_behavior": "Should generate summary of urgent items, upcoming items, and events"
+  }
+]
