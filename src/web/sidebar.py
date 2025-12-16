@@ -77,26 +77,22 @@ def render_sidebar():
         with st.expander(":material/event: Life Events", expanded=True):
             events = st.session_state.repo.get_life_events()
             active_events = [e for e in events if e.status != "completed"]
+            total_tasks = sum(len(e.checklist_items) for e in active_events)
+            completed_tasks = sum(sum(1 for i in e.checklist_items if i.is_completed) for e in active_events)
             
-            st.metric("Active", len(active_events))
+            col1, col2 = st.columns(2)
+            col1.metric("Active", len(active_events))
+            col2.metric("Tasks", f"{completed_tasks}/{total_tasks}")
             
-            if active_events:
-                st.markdown("---")
-                for event in active_events[:3]:
-                    completed = sum(1 for item in event.checklist_items if item.is_completed)
-                    total = len(event.checklist_items)
-                    progress = completed / total if total > 0 else 0
-                    
-                    days_left = (event.target_date - date.today()).days
-                    st.caption(f"**{event.title[:25]}**")
-                    st.progress(progress, text=f"{completed}/{total} tasks · {days_left} days left")
+            st.caption("👉 See **Overview tab** for checklists")
         
         st.divider()
         
         # Footer actions
-        if st.button("Clear conversation", use_container_width=True):
+        if st.button(":material/refresh: Clear conversation", use_container_width=True):
             st.session_state.messages = []
-            st.session_state.agent.reset_conversation()
+            if hasattr(st.session_state, 'agent'):
+                st.session_state.agent.reset_conversation()
             st.rerun()
         
         st.caption(f"Today: {date.today().strftime('%B %d, %Y')}")
