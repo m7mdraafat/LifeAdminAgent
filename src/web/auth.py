@@ -148,7 +148,7 @@ def render_auth_page():
             st.rerun()
     
     st.markdown(
-        "<h1 style='text-align: center;'>🏠 Life Admin Assistant</h1>"
+        "<h1 style='text-align: center;'>🤖 Life Admin Assistant</h1>"
         "<p style='text-align: center; color: gray;'>Your personal life organizer</p>",
         unsafe_allow_html=True
     )
