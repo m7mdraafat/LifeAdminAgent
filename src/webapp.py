@@ -35,7 +35,8 @@ st.set_page_config(
 apply_custom_styles()
 
 # Initialize base repository for auth (no user filter)
-if "repo" not in st.session_state:
+# Also reinitialize if repo is outdated (missing set_user method from older cached session)
+if "repo" not in st.session_state or not hasattr(st.session_state.repo, "set_user"):
     st.session_state.repo = Repository()
     init_sessions_table(st.session_state.repo)  # Ensure sessions table exists
 
