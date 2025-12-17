@@ -20,7 +20,7 @@ from src.database.repository.repository import Repository
 from src.web.styles import apply_custom_styles
 from src.web.sidebar import render_sidebar
 from src.web.chat import render_chat
-from src.web.auth import render_auth_page, get_current_user, logout
+from src.web.auth import render_auth_page, get_current_user, logout, init_sessions_table
 
 
 # Page configuration (must be first Streamlit command)
@@ -37,6 +37,7 @@ apply_custom_styles()
 # Initialize base repository for auth (no user filter)
 if "repo" not in st.session_state:
     st.session_state.repo = Repository()
+    init_sessions_table(st.session_state.repo)  # Ensure sessions table exists
 
 # Initialize session state for persistence across reruns
 if "messages" not in st.session_state:

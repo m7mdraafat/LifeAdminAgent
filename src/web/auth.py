@@ -3,13 +3,26 @@
 import streamlit as st
 import hashlib
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, Tuple
 
 
 def hash_password(password: str) -> str:
     """Hash a password using SHA-256."""
     return hashlib.sha256(password.encode()).hexdigest()
+
+
+def init_sessions_table(repo):
+    """Initialize the sessions table in the database."""
+    with repo._get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS sessions (
+            token TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            created_at TEXT
+        )
+        """)
 
 
 def init_users_table(repo):
@@ -75,8 +88,65 @@ def authenticate_user(repo, username: str, password: str) -> Tuple[bool, Optiona
         return False, None
 
 
+def create_session(repo, user_id: str) -> str:
+    """Create a session token for a user."""
+    init_sessions_table(repo)
+    token = str(uuid.uuid4())
+    
+    with repo._get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+        INSERT INTO sessions (token, user_id, created_at)
+        VALUES (?, ?, ?)
+        """, (token, user_id, datetime.now().isoformat()))
+    
+    return token
+
+
+def get_user_by_session(repo, token: str) -> Optional[dict]:
+    """Get user info from session token."""
+    init_users_table(repo)
+    init_sessions_table(repo)
+    
+    with repo._get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+        SELECT u.id, u.username, u.display_name 
+        FROM users u
+        JOIN sessions s ON u.id = s.user_id
+        WHERE s.token = ?
+        """, (token,))
+        
+        row = cursor.fetchone()
+        if row:
+            return {
+                "id": row["id"],
+                "username": row["username"],
+                "display_name": row["display_name"]
+            }
+        return None
+
+
+def delete_session(repo, token: str):
+    """Delete a session token."""
+    init_sessions_table(repo)
+    with repo._get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM sessions WHERE token = ?", (token,))
+
+
 def render_auth_page():
     """Render the login/signup page."""
+    # Check for existing session token in URL
+    params = st.query_params
+    if "session" in params:
+        token = params["session"]
+        user = get_user_by_session(st.session_state.repo, token)
+        if user:
+            st.session_state.user = user
+            st.session_state.session_token = token
+            st.rerun()
+    
     st.markdown(
         "<h1 style='text-align: center;'>🏠 Life Admin Assistant</h1>"
         "<p style='text-align: center; color: gray;'>Your personal life organizer</p>",
@@ -100,8 +170,11 @@ def render_auth_page():
                     if username and password:
                         success, user = authenticate_user(st.session_state.repo, username, password)
                         if success:
+                            # Create session and store in URL
+                            token = create_session(st.session_state.repo, user["id"])
                             st.session_state.user = user
-                            st.session_state.messages = []  # Clear messages on login
+                            st.session_state.session_token = token
+                            st.query_params["session"] = token
                             st.rerun()
                         else:
                             st.error("Invalid username or password")
@@ -131,13 +204,16 @@ def render_auth_page():
                             new_display
                         )
                         if success:
-                            # Auto-login after signup
-                            st.session_state.user = {
+                            # Auto-login after signup with session
+                            user = {
                                 "id": result,
                                 "username": new_username.lower(),
                                 "display_name": new_display or new_username
                             }
-                            st.session_state.messages = []
+                            token = create_session(st.session_state.repo, result)
+                            st.session_state.user = user
+                            st.session_state.session_token = token
+                            st.query_params["session"] = token
                             st.rerun()
                         else:
                             st.error(result)
@@ -150,6 +226,13 @@ def get_current_user() -> Optional[dict]:
 
 def logout():
     """Log out the current user."""
+    # Delete session from database
+    if "session_token" in st.session_state:
+        delete_session(st.session_state.repo, st.session_state.session_token)
+        del st.session_state.session_token
+    # Clear URL params
+    st.query_params.clear()
+    # Clear session state
     if "user" in st.session_state:
         del st.session_state.user
     if "messages" in st.session_state:
