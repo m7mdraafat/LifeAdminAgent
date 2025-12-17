@@ -26,7 +26,7 @@ from src.web.auth import render_auth_page, get_current_user, logout, init_sessio
 # Page configuration (must be first Streamlit command)
 st.set_page_config(
     page_title="Life Admin Assistant",
-    page_icon="🏠",
+    page_icon="🤖",
     layout="wide",
     initial_sidebar_state="expanded"
 )
