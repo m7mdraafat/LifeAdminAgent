@@ -9,7 +9,8 @@ streamlit>=1.28.0
 python-dotenv>=1.0.0
 rich>=13.0.0
 
-# Evaluation (optional - for running evaluations)
-# azure-ai-evaluation>=1.0.0
+# Evaluation - Azure AI Evaluation SDK for comprehensive agent testing
+azure-ai-evaluation>=1.0.0
+promptflow-core>=1.0.0
 
 # Database (built-in sqlite3, no extra package needed)

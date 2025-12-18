@@ -39,17 +39,24 @@ from .notifications import (
     set_repository as set_notification_repository
 )
 
-# Combined tools list
-ALL_TOOLS = DOCUMENT_TOOLS + SUBSCRIPTION_TOOLS + CHECKLIST_TOOLS + NOTIFICATION_TOOLS
+from .memory_tools import (
+    MEMORY_TOOLS,
+    set_memory_context
+)
+
+# Combined tools list - includes memory tools for persistent context
+ALL_TOOLS = DOCUMENT_TOOLS + SUBSCRIPTION_TOOLS + CHECKLIST_TOOLS + NOTIFICATION_TOOLS + MEMORY_TOOLS
 
 __all__ = [
     "DOCUMENT_TOOLS",
     "SUBSCRIPTION_TOOLS", 
     "CHECKLIST_TOOLS",
     "NOTIFICATION_TOOLS",
+    "MEMORY_TOOLS",
     "ALL_TOOLS",
     "set_document_repository",
     "set_subscription_repository",
     "set_checklist_repository",
-    "set_notification_repository"
+    "set_notification_repository",
+    "set_memory_context"
 ]

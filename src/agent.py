@@ -1,6 +1,7 @@
 """
 Agent configuration for Life Admin Assistant.
 Sets up the ChatAgent with GitHub Models and tools.
+Enhanced with persistent memory and model fallback.
 """
 
 import asyncio
@@ -15,9 +16,10 @@ from agent_framework.openai import OpenAIChatClient
 from agent_framework.observability import setup_observability
 from openai import AsyncOpenAI, APIError, RateLimitError, APIConnectionError
 
-from .tools import ALL_TOOLS, set_document_repository, set_subscription_repository, set_checklist_repository, set_notification_repository
+from .tools import ALL_TOOLS, set_document_repository, set_subscription_repository, set_checklist_repository, set_notification_repository, set_memory_context
 from .config import Config
 from .database.repository.repository import Repository
+from .memory import MemoryStore
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -91,19 +93,26 @@ class LifeAdminAgent:
     """
     The Life Admin Assistant agent.
     Wraps a ChatAgent with our configuration and tools.
+    Enhanced with persistent memory across sessions.
     """
 
     _tracing_initialized = False  # Class-level flag to avoid duplicate setup
     
-    # Token management settings (for 8000 token limit)
-    # Be VERY aggressive to avoid 413 errors
-    MAX_CONVERSATION_TOKENS = 2000  # Very conservative
-    TOKENS_PER_CHAR = 0.5  # Conservative estimate
-    MAX_MESSAGES_BEFORE_SUMMARY = 4  # Summarize very frequently
-    MAX_MESSAGE_LENGTH = 1000  # Truncate long messages in history
+    # Token management settings - More balanced approach
+    MAX_CONVERSATION_TOKENS = 4000  # Increased for better context retention
+    TOKENS_PER_CHAR = 0.4  # Slightly more accurate estimate
+    MAX_MESSAGES_BEFORE_SUMMARY = 8  # Less frequent summarization
+    MAX_MESSAGE_LENGTH = 1500  # Allow longer messages
     SYSTEM_PROMPT_TOKENS = 600  # Condensed system prompt estimate
+    
+    # Model fallback configuration
+    FALLBACK_MODELS = [
+        "openai/gpt-4.1-mini",
+        "openai/gpt-4.1-nano",
+        "openai/gpt-4o-mini"
+    ]
 
-    def __init__(self):
+    def __init__(self, enable_memory: bool = True):
         """Initialize the agent with configuration."""
         Config.validate()
 
@@ -114,9 +123,22 @@ class LifeAdminAgent:
 
         # Initialize database
         self.repository = Repository(db_path=Config.DATABASE_PATH)
+        
+        # Initialize persistent memory store
+        self.enable_memory = enable_memory
+        if enable_memory:
+            self.memory_store = MemoryStore(db_path="data/memory.db")
+        else:
+            self.memory_store = None
+        
+        # Current user ID for memory isolation
+        self._current_user_id: Optional[str] = None
 
         # Load system prompt
         self.system_prompt = self._load_system_prompt()
+        
+        # Current model (for fallback support)
+        self.current_model = Config.MODEL_NAME
 
         # Create OpenAI client pointing to GitHub Models endpoint
         self.openai_client = AsyncOpenAI(
@@ -127,7 +149,7 @@ class LifeAdminAgent:
         # Create chat client
         self.chat_client = OpenAIChatClient(
             async_client=self.openai_client,
-            model_id=Config.MODEL_NAME
+            model_id=self.current_model
         )
 
         # Create the agent with tools
@@ -144,15 +166,84 @@ class LifeAdminAgent:
         # Track conversation for token management
         self.conversation_history: List[Dict[str, str]] = []
         self.conversation_summary: Optional[str] = None
+        
+        # Track actions for session summary
+        self._session_actions: List[str] = []
+        self._session_topics: List[str] = []
     
     def set_user(self, user_id: str):
         """Set the current user for data isolation."""
+        self._current_user_id = user_id
         self.repository.set_user(user_id)
         # Re-share repository with tools to update user context
         set_document_repository(self.repository)
         set_subscription_repository(self.repository)
         set_checklist_repository(self.repository)
         set_notification_repository(self.repository)
+        
+        # Set up memory tools with user context
+        if self.enable_memory and self.memory_store:
+            set_memory_context(self.memory_store, user_id)
+            self._load_user_context()
+    
+    def _load_user_context(self):
+        """Load persistent memory context for the current user."""
+        if not self._current_user_id or not self.memory_store:
+            return
+        
+        context = self.memory_store.get_relevant_context(
+            self._current_user_id,
+            query=""  # General context retrieval
+        )
+        
+        if context:
+            # Update system prompt with user context
+            self.system_prompt = self._load_system_prompt() + f"\n\n## User Context\n{context}"
+            
+            # Recreate agent with updated prompt
+            self.agent = ChatAgent(
+                chat_client=self.chat_client,
+                name=Config.AGENT_NAME,
+                instructions=self.system_prompt,
+                tools=self._get_tools(),
+            )
+            self.thread = self.agent.get_new_thread()
+    
+    def add_user_memory(self, content: str, memory_type: str = "fact", importance: float = 0.5):
+        """Add a memory for the current user."""
+        if not self._current_user_id or not self.memory_store:
+            return None
+        
+        return self.memory_store.add_memory(
+            user_id=self._current_user_id,
+            content=content,
+            memory_type=memory_type,
+            importance=importance
+        )
+    
+    def save_session_summary(self):
+        """Save summary of current session to long-term memory."""
+        if not self._current_user_id or not self.memory_store:
+            return
+        
+        if not self.conversation_history:
+            return
+        
+        # Create a brief summary
+        summary_parts = []
+        if self._session_topics:
+            summary_parts.append(f"Discussed: {', '.join(set(self._session_topics[:5]))}")
+        if self._session_actions:
+            summary_parts.append(f"Actions: {', '.join(set(self._session_actions[:5]))}")
+        
+        summary = ". ".join(summary_parts) if summary_parts else "General conversation"
+        
+        self.memory_store.save_session_summary(
+            user_id=self._current_user_id,
+            summary=summary,
+            key_topics=list(set(self._session_topics)),
+            actions_taken=list(set(self._session_actions))
+        )
 
 
     def _load_system_prompt(self) -> str:
@@ -274,13 +365,65 @@ class LifeAdminAgent:
             
             logger.info(f"Conversation summarized. New token estimate: {self._get_conversation_tokens()}")
     
+    async def _try_model_fallback(self) -> bool:
+        """Try to fall back to an alternative model. Returns True if successful."""
+        current_index = -1
+        for i, model in enumerate(self.FALLBACK_MODELS):
+            if model == self.current_model:
+                current_index = i
+                break
+        
+        next_index = current_index + 1
+        if next_index >= len(self.FALLBACK_MODELS):
+            return False
+        
+        new_model = self.FALLBACK_MODELS[next_index]
+        logger.info(f"Falling back from {self.current_model} to {new_model}")
+        
+        self.current_model = new_model
+        self.chat_client = OpenAIChatClient(
+            async_client=self.openai_client,
+            model_id=self.current_model
+        )
+        self.agent = ChatAgent(
+            chat_client=self.chat_client,
+            name=Config.AGENT_NAME,
+            instructions=self.system_prompt,
+            tools=self._get_tools(),
+        )
+        self.thread = self.agent.get_new_thread()
+        return True
+    
+    def _extract_topics_and_actions(self, user_message: str, response: str):
+        """Extract topics and actions for session tracking."""
+        # Simple keyword extraction for topics
+        topic_keywords = ["document", "subscription", "passport", "license", "moving", 
+                         "job", "wedding", "travel", "insurance", "checklist"]
+        for kw in topic_keywords:
+            if kw in user_message.lower() or kw in response.lower():
+                self._session_topics.append(kw)
+        
+        # Extract actions from response
+        action_indicators = ["✅", "saved", "created", "added", "deleted", "marked", "sent"]
+        for indicator in action_indicators:
+            if indicator in response.lower() or indicator in response:
+                # Try to extract what action was taken
+                if "document" in response.lower():
+                    self._session_actions.append("managed documents")
+                elif "subscription" in response.lower():
+                    self._session_actions.append("managed subscriptions")
+                elif "checklist" in response.lower() or "task" in response.lower():
+                    self._session_actions.append("managed checklists")
+                break
+
     async def chat(self, user_message: str) -> str:
         """
         Send a message and get a response.
         Uses streaming internally but returns complete response.
-        Manages conversation length to avoid token limits.
+        Manages conversation length and includes model fallback.
         """
         max_retries = 3
+        model_fallback_attempted = False
         
         for attempt in range(max_retries):
             try:
@@ -305,6 +448,9 @@ class LifeAdminAgent:
                     "role": "assistant",
                     "content": self._truncate_message(response_text)
                 })
+                
+                # Extract topics and actions for memory
+                self._extract_topics_and_actions(user_message, response_text)
                 
                 return response_text
                 
@@ -331,6 +477,17 @@ class LifeAdminAgent:
                             "Please say 'continue' or rephrase your request. "
                             "Tip: Ask for a summary version first, then expand sections."
                         )
+                
+                # Check for rate limiting or model errors - try fallback
+                elif ("429" in error_str or "rate" in error_str or "quota" in error_str or 
+                      "503" in error_str or "overloaded" in error_str):
+                    if not model_fallback_attempted and await self._try_model_fallback():
+                        model_fallback_attempted = True
+                        logger.info(f"Retrying with fallback model: {self.current_model}")
+                        continue
+                    else:
+                        logger.error(f"Rate limit error and no fallback available: {e}")
+                        return "⚠️ Service is currently busy. Please try again in a moment."
                 else:
                     logger.error(f"Chat error: {e}")
                     raise
@@ -355,11 +512,17 @@ class LifeAdminAgent:
             logger.error(f"Stream error: {e}")
             yield f"\n\n⚠️ An error occurred: {str(e)}"
     
-    def reset_conversation(self):
+    def reset_conversation(self, save_to_memory: bool = True):
         """Reset the conversation thread and history."""
+        # Save session summary before clearing
+        if save_to_memory and self.conversation_history:
+            self.save_session_summary()
+        
         self.thread = self.agent.get_new_thread()
         self.conversation_history = []
         self.conversation_summary = None
+        self._session_actions = []
+        self._session_topics = []
     
     def get_conversation_stats(self) -> Dict:
         """Get statistics about the current conversation."""
@@ -370,8 +533,28 @@ class LifeAdminAgent:
             "has_summary": self.conversation_summary is not None,
             "token_usage_percent": int(
                 (self._get_conversation_tokens() / self.MAX_CONVERSATION_TOKENS) * 100
-            )
+            ),
+            "current_model": self.current_model,
+            "memory_enabled": self.enable_memory,
+            "session_topics": list(set(self._session_topics))[:5],
+            "session_actions_count": len(self._session_actions)
         }
+    
+    def get_user_memories(self, limit: int = 10) -> List[Dict]:
+        """Get memories for the current user."""
+        if not self._current_user_id or not self.memory_store:
+            return []
+        
+        memories = self.memory_store.get_memories(self._current_user_id, limit=limit)
+        return [
+            {
+                "type": m.memory_type,
+                "content": m.content,
+                "importance": m.importance,
+                "created": m.created_at
+            }
+            for m in memories
+        ]
     
 
 async def create_agent() -> LifeAdminAgent:
